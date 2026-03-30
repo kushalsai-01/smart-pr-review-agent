@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: smart-pr-review-bot-api
+  labels:
+    app: smart-pr-review-bot-api
+spec:
+  type: ClusterIP
+  selector:
+    app: smart-pr-review-bot-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+

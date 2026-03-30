@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smart-pr-review-bot-api
+  labels:
+    app: smart-pr-review-bot-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: smart-pr-review-bot-api
+  template:
+    metadata:
+      labels:
+        app: smart-pr-review-bot-api
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      containers:
+        - name: api
+          image: ghcr.io/kushalsai-01/smart-pr-review-agent:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - secretRef:
+                name: smart-pr-review-bot-secrets
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 2
+            failureThreshold: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+          volumeMounts:
+            - name: chroma-data
+              mountPath: /app/chroma
+      imagePullSecrets:
+        - name: ghcr-pull-secret
+      volumes:
+        - name: chroma-data
+          persistentVolumeClaim:
+            claimName: smart-pr-review-bot-chroma-pvc
+

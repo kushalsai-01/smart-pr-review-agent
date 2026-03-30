@@ -1,0 +1,52 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: smart-pr-review-bot-api
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+    alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=300
+    alb.ingress.kubernetes.io/success-codes: '200-399'
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: smart-pr-review-bot-api
+                port:
+                  number: 80
+          - path: /webhook
+            pathType: Prefix
+            backend:
+              service:
+                name: smart-pr-review-bot-api
+                port:
+                  number: 80
+          - path: /review
+            pathType: Prefix
+            backend:
+              service:
+                name: smart-pr-review-bot-api
+                port:
+                  number: 80
+          - path: /approve
+            pathType: Prefix
+            backend:
+              service:
+                name: smart-pr-review-bot-api
+                port:
+                  number: 80
+          - path: /stream
+            pathType: Prefix
+            backend:
+              service:
+                name: smart-pr-review-bot-api
+                port:
+                  number: 80
+
