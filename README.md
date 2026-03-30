@@ -1,93 +1,11 @@
-<div align="center">
-
-<img src="./docs/banner.png" alt="smart-pr-review-bot banner" width="100%"/>
-
-# smart-pr-review-bot
-
-**Autonomous multi-agent AI system for intelligent GitHub PR review and bug detection.**
-Powered by LangGraph, RAG + tree-sitter, and GitHub MCP for real codebase understanding.
-Automatically raises GitHub Issues, drafts fixes, and opens PRs as `smart-pr-review-bot[bot]`.
-Supports Review Only, Human-in-Loop, and Auto Pilot modes with full LangSmith tracing.
-
-<br/>
-
-[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat&logo=python&logoColor=white)](https://python.org)
-[![LangGraph](https://img.shields.io/badge/LangGraph-1.x-7F77DD?style=flat)](https://langchain.com/langgraph)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?style=flat&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![Groq](https://img.shields.io/badge/Groq-llama--3.3--70b-F55036?style=flat)](https://groq.com)
-[![License](https://img.shields.io/badge/License-MIT-22c55e?style=flat)](./LICENSE)
-
-<br/>
-
-</div>
-
----
-
-## What it does
-
-Paste a PR URL. The agent does the rest.
-
-```
-PR URL → Index codebase → Review PR → Hunt bugs → Raise Issues → Draft fix → Open fix PR
+# Smart PR Review Agent
+## Architecture
+![Architecture](./docs/architecture.png)
 ```
 
-Three modes, one URL:
+FastAPI backend with LangGraph workflow, GitHub App integration, and a Vite + React UI.
 
-| Mode | What happens |
-|---|---|
-| **Review only** | Reviews PR, posts inline comments, raises GitHub Issues for bugs found |
-| **Human-in-loop** | Same as above + shows fix diff, waits for your approval before pushing |
-| **Auto pilot** | Fully autonomous — reviews, fixes, runs tests, opens fix PR automatically |
-
----
-
-## Demo
-
-<img src="./docs/demo.gif" alt="demo" width="100%"/>
-
----
-
-## Agent flow
-
-<img src="./docs/agent_flow.png" alt="agent flow diagram" width="100%"/>
-
-
----
-
-## Full architecture
-
-<img src="./docs/architecture.png" alt="architecture diagram" width="100%"/>
----
-
-## Tech stack
-
-<img src="./docs/tech_stack.png" alt="tech stack" width="100%"/>
-
-| Layer | Technology |
-|---|---|
-| LLM | Groq `llama-3.3-70b` — free, fast |
-| Agent orchestration | LangGraph 1.x with conditional edges + checkpointing |
-| GitHub integration | Remote GitHub MCP server via Streamable HTTP |
-| Code parsing | tree-sitter — function and class level chunks |
-| Vector store | ChromaDB — embedded, no extra service |
-| Backend | FastAPI + SSE streaming |
-| Frontend | React + Vite |
-| Checkpointing | Supabase Postgres (LangGraph HITL state) |
-| Tracing | LangSmith — full agent execution traces |
-| Deploy | Render (backend) + Vercel (frontend) |
-
----
-
-## How RAG works here
-
-Unlike normal document RAG that splits text by character count, this project uses **tree-sitter** to parse code into meaningful chunks — whole functions, whole classes. So when the bug hunter asks "what does `authenticate_user` do?" ChromaDB returns the complete function, not a random slice.
-
-```
-Normal RAG          →  random 500-char chunks  →  broken functions
-tree-sitter RAG     →  complete functions       →  real understanding
-```
-
----
+Smart PR review that streams agent progress via SSE and can pause for human approval before drafting and testing fixes.
 
 ## Setup
 
