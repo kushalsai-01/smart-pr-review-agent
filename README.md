@@ -1,6 +1,5 @@
 # Smart PR Review Agent
 ## Architecture
-## Architecture
 ![Architecture](./docs/architecture.png)
 ```
 
