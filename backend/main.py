@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from backend.auth.github_auth import verify_webhook_signature
-from backend.llm_security import secure_llm_call
+from backend.llm_security import clear_llm_context, set_llm_context, secure_llm_call
 from backend.config import settings
 from backend.graph.workflow import get_compiled_graph
 from langgraph.errors import GraphInterrupt
@@ -22,7 +22,7 @@ from backend.models.schemas import (
     ReviewRequest,
     SSEEvent,
 )
-from backend.models.state import FixPatch, WorkflowState
+from backend.models.state import FixPatch, LLMProvider, WorkflowState
 
 
 class SecureTestRequest(BaseModel):
@@ -78,11 +78,25 @@ def _initial_fix_patch() -> FixPatch:
 def _build_initial_state(payload: ReviewRequest, thread_id: str) -> WorkflowState:
     """Builds the initial workflow state from the review request."""
     owner, repo, number = _parse_pr_url(str(payload.pr_url))
+
+    def _default_llm_model(provider: LLMProvider) -> str:
+        """Provides built-in default models per provider."""
+        if provider == "groq":
+            return "llama-3.3-70b"
+        if provider == "claude":
+            return "claude-3-5-sonnet-latest"
+        return "gemini-1.5-pro-latest"
+
+    llm_provider: LLMProvider = payload.llm_provider
+    llm_model = payload.llm_model or _default_llm_model(llm_provider)
+
     return {
         "pr_url": str(payload.pr_url),
         "repo_full_name": f"{owner}/{repo}",
         "pr_number": number,
         "mode": payload.mode,
+        "llm_provider": llm_provider,
+        "llm_model": llm_model,
         "review_findings": [],
         "bugs_found": [],
         "issues_raised": [],
@@ -195,6 +209,8 @@ async def _run_graph(thread_id: str) -> None:
             }
         )
         await queue.put(None)
+    finally:
+        clear_llm_context()
 
 
 async def _resume_graph(thread_id: str) -> None:
@@ -205,6 +221,11 @@ async def _resume_graph(thread_id: str) -> None:
     queue: asyncio.Queue = run["queue"]
     state: WorkflowState = run["state"]
     reported: set[str] = run["reported"]
+    set_llm_context(
+        provider=state["llm_provider"],
+        api_key=run.get("llm_api_key"),
+        model=state.get("llm_model"),
+    )
     try:
         graph = get_compiled_graph()
         config = {"configurable": {"thread_id": thread_id}}
@@ -246,6 +267,8 @@ async def _resume_graph(thread_id: str) -> None:
             }
         )
         await queue.put(None)
+    finally:
+        clear_llm_context()
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -266,8 +289,15 @@ async def review(payload: ReviewRequest) -> ReviewAcceptedResponse:
     thread_id = str(uuid.uuid4())
     state = _build_initial_state(payload, thread_id)
     queue: asyncio.Queue = asyncio.Queue()
-    _RUNS[thread_id] = {"queue": queue, "state": state, "reported": set()}
+    _RUNS[thread_id] = {
+        "queue": queue,
+        "state": state,
+        "reported": set(),
+        "llm_api_key": payload.llm_api_key,
+    }
+    set_llm_context(provider=state["llm_provider"], api_key=payload.llm_api_key, model=state.get("llm_model"))
     asyncio.create_task(_run_graph(thread_id))
+    clear_llm_context()
     return ReviewAcceptedResponse(thread_id=thread_id, phase="scheduled")
 
 
@@ -326,8 +356,15 @@ async def _handle_review_from_pr_payload(pr_url: str, mode: str) -> str:
     thread_id = str(uuid.uuid4())
     state = _build_initial_state(ReviewRequest(pr_url=pr_url, mode=mode), thread_id)
     queue: asyncio.Queue = asyncio.Queue()
-    _RUNS[thread_id] = {"queue": queue, "state": state, "reported": set()}
+    _RUNS[thread_id] = {
+        "queue": queue,
+        "state": state,
+        "reported": set(),
+        "llm_api_key": None,
+    }
+    set_llm_context(provider=state["llm_provider"], api_key=None, model=state.get("llm_model"))
     asyncio.create_task(_run_graph(thread_id))
+    clear_llm_context()
     return thread_id
 
 

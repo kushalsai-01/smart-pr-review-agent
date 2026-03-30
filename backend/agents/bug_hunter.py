@@ -4,16 +4,22 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langsmith import traceable
 
 from backend.models.schemas import BugHuntOutput
-from backend.models.state import WorkflowState
+from backend.models.state import LLMProvider, WorkflowState
 from backend.rag.code_indexer import search_codebase
 from backend.llm_security import BLOCKED_PREFIX, is_blocked_response, secure_llm_call
 
 
 @traceable(run_type="llm", name="hunt_bugs_llm")
-async def _hunt_bugs_llm(system: SystemMessage, human: HumanMessage) -> str:
+async def _hunt_bugs_llm(
+    system: SystemMessage,
+    human: HumanMessage,
+    thread_id: str,
+    provider: LLMProvider,
+    model: str | None,
+) -> str:
     """Calls the configured LLM to generate bug reports."""
     prompt_text = f"{system.content}\n\n{human.content}"
-    return await secure_llm_call(prompt_text)
+    return await secure_llm_call(prompt_text, thread_id=thread_id, provider=provider, model=model)
 
 
 @traceable(run_type="agent", name="hunt_bugs")
@@ -67,7 +73,13 @@ async def hunt_bugs(state: WorkflowState) -> WorkflowState:
     )
     updated = dict(state)
     try:
-        raw = await _hunt_bugs_llm(system, human)
+        raw = await _hunt_bugs_llm(
+            system,
+            human,
+            thread_id=str(state.get("thread_id", "")),
+            provider=state["llm_provider"],
+            model=state.get("llm_model"),
+        )
         if is_blocked_response(raw) or raw.startswith(BLOCKED_PREFIX):
             updated["bugs_found"] = []
             updated["error"] = "LLM call blocked by input security policy."

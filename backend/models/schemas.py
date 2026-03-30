@@ -2,7 +2,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, HttpUrl
 
-from backend.models.state import DetectedBug, FixPatch, InlineComment, Mode, ReviewFinding
+from backend.models.state import DetectedBug, FixPatch, InlineComment, LLMProvider, Mode, ReviewFinding
 
 
 class IndexerOutput(BaseModel):
@@ -30,6 +30,9 @@ class FixDrafterOutput(BaseModel):
 class ReviewRequest(BaseModel):
     pr_url: HttpUrl
     mode: Mode
+    llm_provider: LLMProvider = "groq"
+    llm_api_key: str | None = None
+    llm_model: str | None = None
 
 
 class SSEEvent(BaseModel):

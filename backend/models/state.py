@@ -2,6 +2,7 @@ from typing import Literal, TypedDict
 
 
 Mode = Literal["review_only", "human_in_loop", "auto_pilot"]
+LLMProvider = Literal["groq", "claude", "gemini"]
 
 
 class InlineComment(TypedDict):
@@ -36,6 +37,8 @@ class WorkflowState(TypedDict):
     repo_full_name: str
     pr_number: int
     mode: Mode
+    llm_provider: LLMProvider
+    llm_model: str
     review_findings: list[ReviewFinding]
     bugs_found: list[DetectedBug]
     issues_raised: list[str]

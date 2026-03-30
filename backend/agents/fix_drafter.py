@@ -10,7 +10,7 @@ from langsmith import traceable
 from pydantic import BaseModel
 
 from backend.auth.github_auth import generate_jwt, get_installation_token
-from backend.models.state import WorkflowState
+from backend.models.state import LLMProvider, WorkflowState
 from backend.rag.code_indexer import clone_repository, search_codebase
 from backend.llm_security import BLOCKED_PREFIX, is_blocked_response, secure_llm_call
 
@@ -97,7 +97,12 @@ def _restore_worktree(repo_dir: Path) -> None:
 
 
 @traceable(run_type="llm", name="draft_fix_llm")
-async def _draft_fix_llm(prompt_body: str) -> str:
+async def _draft_fix_llm(
+    prompt_body: str,
+    thread_id: str,
+    provider: LLMProvider,
+    model: str | None,
+) -> str:
     """Calls the configured LLM to draft a fix plan."""
     system = SystemMessage(
         content=(
@@ -110,7 +115,7 @@ async def _draft_fix_llm(prompt_body: str) -> str:
     )
     human = HumanMessage(content=prompt_body)
     prompt_text = f"{system.content}\n\n{human.content}"
-    return await secure_llm_call(prompt_text)
+    return await secure_llm_call(prompt_text, thread_id=thread_id, provider=provider, model=model)
 
 
 def _extract_fix_plan_json(raw: str) -> str:
@@ -184,7 +189,12 @@ async def draft_fix(state: WorkflowState) -> WorkflowState:
                 },
                 ensure_ascii=False,
             )
-            raw = await _draft_fix_llm(prompt_body)
+            raw = await _draft_fix_llm(
+                prompt_body,
+                thread_id=str(state.get("thread_id", "")),
+                provider=state["llm_provider"],
+                model=state.get("llm_model"),
+            )
             if is_blocked_response(raw) or raw.startswith(BLOCKED_PREFIX):
                 blocked_error = "LLM call blocked by input security policy."
                 test_output = (test_output or "") + blocked_error

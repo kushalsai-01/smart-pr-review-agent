@@ -95,7 +95,12 @@ async def review_pr(state: WorkflowState) -> WorkflowState:
     async def _review_pr_llm() -> str:
         """Calls the configured LLM to generate a structured PR review."""
         prompt_text = f"{system.content}\n\n{human.content}"
-        return await secure_llm_call(prompt_text)
+        return await secure_llm_call(
+            prompt_text,
+            thread_id=str(state.get("thread_id", "")),
+            provider=state["llm_provider"],
+            model=state.get("llm_model"),
+        )
 
     try:
         raw = await _review_pr_llm()
