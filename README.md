@@ -8,90 +8,194 @@ FastAPI backend with LangGraph workflow, GitHub App integration, and a Vite + Re
 Smart PR review that streams agent progress via SSE and can pause for human approval before drafting and testing fixes.
 
 ## Setup
-1. Copy `.env.example` to `.env` and set these values:
-   - `GROQ_API_KEY`
-   - `GITHUB_PRIVATE_KEY` (PEM)
-   - `GITHUB_WEBHOOK_SECRET`
-   - `DATABASE_URL`
-   - `LANGCHAIN_API_KEY`
-2. Backend:
-   - `pip install -r requirements.txt`
-   - `uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000`
-3. Frontend:
-   - `cd frontend`
-   - `npm install`
-   - `npm run dev`
+
+### Prerequisites
+
+- Python 3.11+
+- Node 18+
+- Supabase account (free)
+- Groq API key (free)
+- LangSmith account (free)
+- GitHub App with App ID + private key
+
+### Environment
+
+```bash
+cp .env.example .env
+```
+
+Fill in `.env`:
+
+```env
+GROQ_API_KEY=
+GITHUB_APP_ID=3222129
+GITHUB_PRIVATE_KEY=       # contents of your .pem file
+GITHUB_WEBHOOK_SECRET=
+DATABASE_URL=             # Supabase Postgres URL
+LANGCHAIN_API_KEY=
+LANGSMITH_PROJECT=smart-pr-review-bot
+CHROMA_PERSIST_DIR=./chroma_db
+GITHUB_MCP_URL=https://api.githubcopilot.com/mcp/
+FRONTEND_URL=http://localhost:5173
+```
+
+### Backend
+
+```bash
+pip install -r requirements.txt
+uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+---
 
 ## API
+
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/health` | Health + graph readiness |
-| `POST` | `/review` | Starts a review workflow (returns `thread_id`) |
+| `POST` | `/review` | Start a review workflow — returns `thread_id` |
 | `GET` | `/stream/{thread_id}` | SSE stream of agent step events |
-| `POST` | `/approve` | Approve/reject in `human_in_loop` mode |
-| `POST` | `/webhook` | GitHub webhook trigger for PR events |
+| `POST` | `/approve` | Approve or reject in `human_in_loop` mode |
+| `POST` | `/webhook` | GitHub webhook — auto-triggers on PR open/sync |
 
-## Architecture
+### Example
 
-```mermaid
-flowchart TD
-  User[User] --> Frontend[Frontend React UI]
-  Frontend -->|POST /review| API[FastAPI backend]
-  API -->|thread_id| LangGraph[LangGraph workflow]
-  LangGraph --> Indexer[Index repository + tree-sitter chunks]
-  Indexer --> Chroma[Chroma vector store]
-  LangGraph --> Reviewer[Groq PR review + confidence]
-  Reviewer -->|low confidence| BugHunter[Groq bug hunting]
-  BugHunter --> IssueRaiser[Create GitHub issues]
-  IssueRaiser --> Human[Interrupt for human approval]
-  Human -->|approved| FixDraft[Groq patch draft + apply + tests]
-  Human -->|rejected| End[Stop]
-  FixDraft --> Frontend
-  API -->|GET /stream/{thread_id}| FrontendStream[SSE events]
+```bash
+# start a review
+curl -X POST http://localhost:8000/review \
+  -H "Content-Type: application/json" \
+  -d '{"pr_url": "https://github.com/owner/repo/pull/42", "mode": "human_in_loop"}'
+
+# stream progress
+curl http://localhost:8000/stream/{thread_id}
+
+# approve the fix
+curl -X POST http://localhost:8000/approve \
+  -H "Content-Type: application/json" \
+  -d '{"thread_id": "...", "approved": true}'
 ```
+
+---
 
 ## Deploy
 
-### Backend (Render)
-1. Use `render.yaml` for the `smart-pr-review-bot-api` service.
-2. Set Render environment variables matching `.env.example`.
-3. Start command is `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`.
+### Backend — Render
 
-### Frontend (Vercel)
-1. Use `vercel.json` to build from `frontend/` into `frontend/dist`.
-2. SPA routing rewrites all routes to `index.html`.
+```bash
+# render.yaml already configured
+# set env vars in Render dashboard matching .env.example
+# start command: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+```
 
-### Backend (Kubernetes via GitHub Actions)
+### Frontend — Vercel
 
-This repo includes a CI/CD pipeline for the backend using Docker + GHCR + Kubernetes:
+```bash
+# vercel.json already configured
+# build from frontend/ into frontend/dist
+# SPA routing rewrites all paths to index.html
+```
 
-1. CI on PRs: `.github/workflows/ci.yml`
-2. Build + push backend image on `main`: `.github/workflows/build-push.yml`
-3. Deploy to Kubernetes on `main`: `.github/workflows/deploy.yml`
+### Kubernetes (CI/CD via GitHub Actions)
 
-Kubernetes manifests:
+Three workflows included:
 
-- Deployment: `k8s/deployment.yaml`
-- Service: `k8s/service.yaml`
-- Secret template: `k8s/secret.yaml.example`
+| Workflow | Trigger | What it does |
+|---|---|---|
+| `ci.yml` | PR | Lint + test |
+| `build-push.yml` | push to `main` | Build Docker image → push to GHCR |
+| `deploy.yml` | push to `main` | Deploy to Kubernetes cluster |
 
-Secrets to configure in GitHub Actions (for the deploy workflow):
+Required GitHub Actions secrets:
 
-- `KUBECONFIG_B64`: base64-encoded kubeconfig for cluster access
-- `GHCR_TOKEN` (optional): token used to create `ghcr-pull-secret` for private image pulls
+```
+KUBECONFIG_B64     # base64-encoded kubeconfig
+GHCR_TOKEN         # GitHub container registry token
+```
 
-Kubernetes runtime secrets:
+Kubernetes manifests in `k8s/`:
 
-- Create `smart-pr-review-bot-secrets` from `k8s/secret.yaml.example` (or create the Secret manually with the same keys).
+```
+k8s/deployment.yaml
+k8s/service.yaml
+k8s/secret.yaml.example   # copy and fill in — never commit actual secrets
+```
 
-About GitHub App attribution in `contributors`:
+---
 
-- `contributors` is derived from commit author identity.
-- If the GitHub App creates commits (using its installation token) those commits will attribute to the GitHub App/bot user, and the bot will appear in `contributors`.
-- For PR merges, GitHub merge methods can change how authorship is represented in history:
-  - “Merge commit” preserves commit authors.
-  - “Squash and merge” creates a new commit and typically attributes the squash commit to the merge author instead of individual commit authors.
+## GitHub App contributor attribution
 
-## Demo
+When the bot creates commits using its installation token, it appears as `smart-pr-review-bot[bot]` in the repo's contributor list — the same way `cursor[bot]` and `github-actions[bot]` appear.
 
-Replace `./docs/demo.gif` with your demo animation.
+Fix PR commit messages include:
+
+```
+fix: handle JWT expiry in authenticate_user()
+
+Auto-fix generated by smart-pr-review-bot
+Reviewed {pr_url} · Found via RAG over codebase
+
+Co-authored-by: {your-name} <your@email.com>
+Co-authored-by: smart-pr-review-bot[bot] <smart-pr-review-bot[bot]@users.noreply.github.com>
+```
+
+---
+
+## Project structure
+
+```
+smart-pr-review-bot/
+├── backend/
+│   ├── main.py                  ← FastAPI app + webhook handler
+│   ├── config.py                ← pydantic-settings BaseSettings
+│   ├── auth/
+│   │   └── github_auth.py       ← GitHub App JWT + installation token
+│   ├── agents/
+│   │   ├── indexer.py           ← tree-sitter + ChromaDB RAG
+│   │   ├── reviewer.py          ← PR review + inline comments
+│   │   ├── bug_hunter.py        ← deep RAG bug search
+│   │   ├── issue_raiser.py      ← creates GitHub Issues
+│   │   └── fix_drafter.py       ← patch + test runner
+│   ├── graph/
+│   │   └── workflow.py          ← LangGraph graph + conditional edges
+│   └── models/
+│       ├── state.py             ← WorkflowState TypedDict
+│       └── schemas.py           ← Pydantic v2 models
+├── frontend/
+│   └── src/
+│       ├── App.jsx
+│       └── components/
+│           ├── PRInput.jsx
+│           ├── ModeSelector.jsx
+│           ├── LiveFeed.jsx
+│           ├── DiffViewer.jsx
+│           └── ApprovePanel.jsx
+├── k8s/
+├── .github/workflows/
+├── .cursorrules
+├── .env.example
+├── render.yaml
+├── vercel.json
+└── requirements.txt
+```
+
+---
+
+## LangSmith tracing
+
+Every agent run produces a full LangSmith trace — every LLM call, every RAG query, every MCP tool call, token count per step, and total latency. The trace link is included in every fix PR description so anyone reviewing the PR can see exactly how the agent reached its conclusion.
+
+---
+
+<div align="center">
+
+Built by [@kushalsai-01](https://github.com/kushalsai-01) · MIT License
+
+</div>
