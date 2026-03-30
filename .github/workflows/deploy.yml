@@ -1,0 +1,60 @@
+name: Deploy to Kubernetes
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  DEPLOYMENT_NAME: smart-pr-review-bot-api
+  CONTAINER_NAME: api
+  NAMESPACE: default
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${KUBECONFIG_B64}" | base64 -d > ~/.kube/config
+        env:
+          KUBECONFIG_B64: ${{ secrets.KUBECONFIG_B64 }}
+
+      - name: Create/update GHCR pull secret (optional)
+        if: ${{ secrets.GHCR_TOKEN != '' }}
+        run: |
+          kubectl -n "${NAMESPACE}" create secret docker-registry ghcr-pull-secret \
+            --docker-server="${REGISTRY}" \
+            --docker-username="${{ github.actor }}" \
+            --docker-password="${GHCR_TOKEN}" \
+            --docker-email="${{ github.actor }}@users.noreply.github.com" \
+            --dry-run=client -o yaml | kubectl apply -f -
+        env:
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Apply manifests
+        run: |
+          kubectl -n "${NAMESPACE}" apply -f k8s/service.yaml
+          kubectl -n "${NAMESPACE}" apply -f k8s/chroma-pvc.yaml
+          kubectl -n "${NAMESPACE}" apply -f k8s/deployment.yaml
+          if [ -f k8s/ingress.yaml ]; then kubectl -n "${NAMESPACE}" apply -f k8s/ingress.yaml; fi
+
+      - name: Set image tag
+        run: |
+          IMAGE="${REGISTRY}/${IMAGE_NAME}:${GITHUB_SHA}"
+          kubectl -n "${NAMESPACE}" set image "deployment/${DEPLOYMENT_NAME}" "${CONTAINER_NAME}=${IMAGE}" --record
+          kubectl -n "${NAMESPACE}" rollout status "deployment/${DEPLOYMENT_NAME}"
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+

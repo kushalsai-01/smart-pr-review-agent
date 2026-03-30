@@ -110,6 +110,37 @@ flowchart TD
 1. Use `vercel.json` to build from `frontend/` into `frontend/dist`.
 2. SPA routing rewrites all routes to `index.html`.
 
+### Backend (Kubernetes via GitHub Actions)
+
+This repo includes a CI/CD pipeline for the backend using Docker + GHCR + Kubernetes:
+
+1. CI on PRs: `.github/workflows/ci.yml`
+2. Build + push backend image on `main`: `.github/workflows/build-push.yml`
+3. Deploy to Kubernetes on `main`: `.github/workflows/deploy.yml`
+
+Kubernetes manifests:
+
+- Deployment: `k8s/deployment.yaml`
+- Service: `k8s/service.yaml`
+- Secret template: `k8s/secret.yaml.example`
+
+Secrets to configure in GitHub Actions (for the deploy workflow):
+
+- `KUBECONFIG_B64`: base64-encoded kubeconfig for cluster access
+- `GHCR_TOKEN` (optional): token used to create `ghcr-pull-secret` for private image pulls
+
+Kubernetes runtime secrets:
+
+- Create `smart-pr-review-bot-secrets` from `k8s/secret.yaml.example` (or create the Secret manually with the same keys).
+
+About GitHub App attribution in `contributors`:
+
+- `contributors` is derived from commit author identity.
+- If the GitHub App creates commits (using its installation token) those commits will attribute to the GitHub App/bot user, and the bot will appear in `contributors`.
+- For PR merges, GitHub merge methods can change how authorship is represented in history:
+  - “Merge commit” preserves commit authors.
+  - “Squash and merge” creates a new commit and typically attributes the squash commit to the merge author instead of individual commit authors.
+
 ## Demo
 
 Replace `./docs/demo.gif` with your demo animation.
