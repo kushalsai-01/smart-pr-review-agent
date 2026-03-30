@@ -3,24 +3,17 @@ import json
 from langchain_core.messages import HumanMessage, SystemMessage
 from langsmith import traceable
 
-from backend.config import settings
 from backend.models.schemas import BugHuntOutput
 from backend.models.state import WorkflowState
 from backend.rag.code_indexer import search_codebase
+from backend.llm_security import BLOCKED_PREFIX, is_blocked_response, secure_llm_call
 
 
 @traceable(run_type="llm", name="hunt_bugs_llm")
 async def _hunt_bugs_llm(system: SystemMessage, human: HumanMessage) -> str:
     """Calls the configured LLM to generate bug reports."""
-    from langchain_groq import ChatGroq
-
-    llm = ChatGroq(
-        groq_api_key=settings.groq_api_key,
-        model="llama-3.3-70b",
-        temperature=0.2,
-    )
-    result = await llm.ainvoke([system, human])
-    return str(result.content)
+    prompt_text = f"{system.content}\n\n{human.content}"
+    return await secure_llm_call(prompt_text)
 
 
 @traceable(run_type="agent", name="hunt_bugs")
@@ -75,9 +68,13 @@ async def hunt_bugs(state: WorkflowState) -> WorkflowState:
     updated = dict(state)
     try:
         raw = await _hunt_bugs_llm(system, human)
-        parsed = BugHuntOutput.model_validate_json(raw)
-        updated["bugs_found"] = parsed.bugs_found
-        updated["error"] = ""
+        if is_blocked_response(raw) or raw.startswith(BLOCKED_PREFIX):
+            updated["bugs_found"] = []
+            updated["error"] = "LLM call blocked by input security policy."
+        else:
+            parsed = BugHuntOutput.model_validate_json(raw)
+            updated["bugs_found"] = parsed.bugs_found
+            updated["error"] = ""
     except Exception as exc:
         updated["bugs_found"] = []
         updated["error"] = str(exc)[:2000]

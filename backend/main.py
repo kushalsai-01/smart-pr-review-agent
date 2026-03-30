@@ -6,9 +6,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from backend.auth.github_auth import verify_webhook_signature
+from backend.llm_security import secure_llm_call
 from backend.config import settings
 from backend.graph.workflow import get_compiled_graph
 from langgraph.errors import GraphInterrupt
@@ -21,6 +23,12 @@ from backend.models.schemas import (
     SSEEvent,
 )
 from backend.models.state import FixPatch, WorkflowState
+
+
+class SecureTestRequest(BaseModel):
+    """Request body for secure LLM test endpoint."""
+
+    prompt: str
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -304,6 +312,13 @@ async def approve(payload: ApproveRequest) -> ApproveResponse:
         approval_status=updated["approval_status"],
         fix_patch=updated["fix_patch"],
     )
+
+
+@app.post("/llm/secure-test")
+async def secure_test(payload: SecureTestRequest) -> dict[str, str]:
+    """Secures a prompt then calls the LLM using the security wrapper."""
+    response = await secure_llm_call(payload.prompt)
+    return {"response": response}
 
 
 async def _handle_review_from_pr_payload(pr_url: str, mode: str) -> str:

@@ -6,10 +6,10 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langsmith import traceable
 
 from backend.auth.github_auth import generate_jwt, get_installation_token
-from backend.config import settings
 from backend.models.schemas import ReviewRequest, ReviewerOutput
-from backend.models.state import ReviewFinding, WorkflowState
+from backend.models.state import WorkflowState
 from backend.rag.code_indexer import search_codebase
+from backend.llm_security import BLOCKED_PREFIX, is_blocked_response, secure_llm_call
 
 
 @traceable(run_type="agent", name="review_pr")
@@ -94,33 +94,35 @@ async def review_pr(state: WorkflowState) -> WorkflowState:
     @traceable(run_type="llm", name="review_pr_llm")
     async def _review_pr_llm() -> str:
         """Calls the configured LLM to generate a structured PR review."""
-        from langchain_groq import ChatGroq
-
-        llm = ChatGroq(
-            groq_api_key=settings.groq_api_key,
-            model="llama-3.3-70b",
-            temperature=0.2,
-        )
-        llm_result = await llm.ainvoke([system, human])
-        return str(llm_result.content)
+        prompt_text = f"{system.content}\n\n{human.content}"
+        return await secure_llm_call(prompt_text)
 
     try:
         raw = await _review_pr_llm()
-        parsed = ReviewerOutput.model_validate_json(raw)
-        findings: list[ReviewFinding] = []
-        for item in parsed.review_findings:
-            entry: dict[str, Any] = dict(item)
-            entry.setdefault("inline_comments", [])
-            entry["confidence"] = float(parsed.confidence)
-            findings.append(entry)
-        if not findings:
+        if is_blocked_response(raw) or raw.startswith(BLOCKED_PREFIX):
             findings = [
                 {
-                    "confidence": float(parsed.confidence),
-                    "review_summary": "",
+                    "confidence": 0.0,
+                    "review_summary": "LLM call blocked by input security policy.",
                     "inline_comments": [],
                 }
             ]
+        else:
+            parsed = ReviewerOutput.model_validate_json(raw)
+            findings = []
+            for item in parsed.review_findings:
+                entry: dict[str, Any] = dict(item)
+                entry.setdefault("inline_comments", [])
+                entry["confidence"] = float(parsed.confidence)
+                findings.append(entry)
+            if not findings:
+                findings = [
+                    {
+                        "confidence": float(parsed.confidence),
+                        "review_summary": "",
+                        "inline_comments": [],
+                    }
+                ]
     except Exception as exc:
         findings = [
             {

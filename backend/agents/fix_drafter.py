@@ -10,9 +10,9 @@ from langsmith import traceable
 from pydantic import BaseModel
 
 from backend.auth.github_auth import generate_jwt, get_installation_token
-from backend.config import settings
-from backend.models.state import FixPatch, WorkflowState
+from backend.models.state import WorkflowState
 from backend.rag.code_indexer import clone_repository, search_codebase
+from backend.llm_security import BLOCKED_PREFIX, is_blocked_response, secure_llm_call
 
 
 class _FilePatch(BaseModel):
@@ -99,13 +99,6 @@ def _restore_worktree(repo_dir: Path) -> None:
 @traceable(run_type="llm", name="draft_fix_llm")
 async def _draft_fix_llm(prompt_body: str) -> str:
     """Calls the configured LLM to draft a fix plan."""
-    from langchain_groq import ChatGroq
-
-    llm = ChatGroq(
-        groq_api_key=settings.groq_api_key,
-        model="llama-3.3-70b",
-        temperature=0.2,
-    )
     system = SystemMessage(
         content=(
             "You are an expert software engineer. "
@@ -116,8 +109,8 @@ async def _draft_fix_llm(prompt_body: str) -> str:
         ),
     )
     human = HumanMessage(content=prompt_body)
-    result = await llm.ainvoke([system, human])
-    return str(result.content)
+    prompt_text = f"{system.content}\n\n{human.content}"
+    return await secure_llm_call(prompt_text)
 
 
 def _extract_fix_plan_json(raw: str) -> str:
@@ -158,6 +151,7 @@ async def draft_fix(state: WorkflowState) -> WorkflowState:
     fix_diff = ""
     test_output = ""
     co_authored_by = "Co-authored-by: smart-pr-review-bot <smart-pr-review-bot@users.noreply.github.com>"
+    blocked_error = ""
     try:
         for attempt in range(3):
             if attempt > 0:
@@ -191,6 +185,10 @@ async def draft_fix(state: WorkflowState) -> WorkflowState:
                 ensure_ascii=False,
             )
             raw = await _draft_fix_llm(prompt_body)
+            if is_blocked_response(raw) or raw.startswith(BLOCKED_PREFIX):
+                blocked_error = "LLM call blocked by input security policy."
+                test_output = (test_output or "") + blocked_error
+                break
             fix_json = _extract_fix_plan_json(raw)
             plan = _FixPlan.model_validate_json(fix_json)
             for fp in plan.files:
@@ -319,5 +317,8 @@ async def draft_fix(state: WorkflowState) -> WorkflowState:
         "co_authored_by": co_authored_by,
     }
     updated["approval_status"] = "tests_passed" if fix_diff else "tests_failed"
-    updated["error"] = "" if fix_diff else updated.get("error", "")
+    if fix_diff:
+        updated["error"] = ""
+    else:
+        updated["error"] = blocked_error or updated.get("error", "")
     return updated
